@@ -1,0 +1,19 @@
+# okboard example config — copy, edit, run: python okboard.py
+port = 8080
+interval = 60   # seconds between check rounds
+
+[[check]]
+name = "Example website"
+type = "http"
+target = "https://example.com"
+
+[[check]]
+name = "Router"
+type = "ping"
+target = "192.168.1.1"
+
+[[check]]
+name = "SSH on a server"
+type = "tcp"
+target = "192.168.1.10:22"
+timeout = 3   # optional, seconds (default 5)
