@@ -189,6 +189,7 @@ def make_handler(checks: list[dict], interval: float):
                 return
             self.send_response(200)
             self.send_header("Content-Type", ctype)
+            self.send_header("Access-Control-Allow-Origin", "*")  # read-only data, let dashboards embed it
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
