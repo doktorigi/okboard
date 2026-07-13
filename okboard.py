@@ -46,6 +46,21 @@ def check_ping(target: str, timeout: float) -> bool:
 CHECKERS = {"http": check_http, "tcp": check_tcp, "ping": check_ping}
 
 
+def notify(webhook: str, text: str) -> None:
+    """POST a state-change alert to a webhook. Logs failures, never raises."""
+    try:
+        if "discord.com" in webhook or "hooks.slack.com" in webhook:
+            data = json.dumps({"content": text, "text": text}).encode()
+            headers = {"Content-Type": "application/json"}
+        else:  # ntfy and anything else that takes a plain-text body
+            data = text.encode()
+            headers = {"Title": "okboard"}
+        req = urllib.request.Request(webhook, data=data, headers=headers)
+        urllib.request.urlopen(req, timeout=10, context=_SSL_CTX)
+    except Exception as e:
+        print(f"okboard: webhook failed: {e}", file=sys.stderr)
+
+
 def run_one(check: dict) -> tuple[bool, int]:
     """Run a single check. Returns (ok, latency_ms). Never raises."""
     fn = CHECKERS[check["type"]]
@@ -57,11 +72,42 @@ def run_one(check: dict) -> tuple[bool, int]:
     return ok, int((time.monotonic() - start) * 1000)
 
 
-def poll_loop(checks: list[dict], interval: float) -> None:
+def poll_once(checks: list[dict], webhook: str | None = None,
+              history_file: str | None = None) -> None:
+    for c in checks:
+        prev = c["history"][-1]["ok"] if c["history"] else None
+        ok, ms = run_one(c)
+        sample = {"ts": int(time.time()), "ok": ok, "ms": ms}
+        c["history"].append(sample)
+        if history_file:
+            # ponytail: append-only, grows forever; rotate it yourself if it matters
+            with open(history_file, "a") as f:
+                f.write(json.dumps({"check": c["name"], **sample}) + "\n")
+        if webhook and prev is not None and prev != ok:
+            state = "UP" if ok else "DOWN"
+            notify(webhook, f"{state}: {c['name']} ({c['target']})")
+
+
+def load_history(path: str, checks: list[dict]) -> None:
+    by_name = {c["name"]: c for c in checks}
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    sample = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # partial line from an unclean shutdown
+                c = by_name.get(sample.pop("check", None))
+                if c:
+                    c["history"].append(sample)
+    except FileNotFoundError:
+        pass
+
+
+def poll_loop(checks: list[dict], interval: float, webhook: str | None,
+              history_file: str | None) -> None:
     while True:
-        for c in checks:
-            ok, ms = run_one(c)
-            c["history"].append({"ts": int(time.time()), "ok": ok, "ms": ms})
+        poll_once(checks, webhook, history_file)
         time.sleep(interval)
 
 
@@ -108,7 +154,7 @@ def render_html(checks: list[dict], interval: float) -> str:
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="refresh" content="{max(int(interval), 10)}">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>okboard</title><style>
+<title>{"&#9989;" if all_up else "&#128308;"} okboard</title><style>
 body{{background:#0f1117;color:#e6e6e6;font:15px/1.5 system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 16px}}
 h1{{font-size:20px;font-weight:600}}
 .row{{display:flex;align-items:center;gap:14px;background:#181b23;border-radius:10px;padding:14px 16px;margin:10px 0}}
@@ -157,7 +203,8 @@ def load_config(path: str) -> dict:
     import tomllib
 
     with open(path, "rb") as f:
-        cfg = tomllib.load(f)
+        # utf-8-sig: Windows editors love writing a BOM, tomllib hates reading one
+        cfg = tomllib.loads(f.read().decode("utf-8-sig"))
     checks = cfg.get("check", [])
     if not checks:
         sys.exit(f"no [[check]] entries in {path}")
@@ -179,7 +226,12 @@ def main() -> None:
     checks = cfg["check"]
     interval = cfg.get("interval", 60)
     port = cfg.get("port", 8080)
-    threading.Thread(target=poll_loop, args=(checks, interval), daemon=True).start()
+    webhook = cfg.get("webhook")
+    history_file = cfg.get("history_file")
+    if history_file:
+        load_history(history_file, checks)
+    threading.Thread(target=poll_loop, args=(checks, interval, webhook, history_file),
+                     daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(checks, interval))
     print(f"okboard: {len(checks)} checks every {interval}s → http://localhost:{port}")
     server.serve_forever()

@@ -2,6 +2,9 @@
 port = 8080
 interval = 60   # seconds between check rounds
 
+# webhook = "https://ntfy.sh/my-topic"     # alert when a check changes state
+# history_file = "okboard-history.jsonl"   # keep history across restarts
+
 [[check]]
 name = "Example website"
 type = "http"

@@ -46,8 +46,30 @@ timeout = 3            # optional, seconds (default 5)
 - **tcp** — up if `host:port` accepts a connection.
 - **ping** — up if one ICMP echo comes back (uses the system `ping`).
 
-History is kept in memory (last 288 samples per check — 24h at 5-min interval).
-Restart = clean slate, by design.
+The last 288 samples per check are shown (24h at 5-min interval).
+
+## Alerts
+
+Set a webhook and okboard POSTs a message whenever a check changes state
+(`DOWN: Proxmox (…)` / `UP: Proxmox (…)`):
+
+```toml
+webhook = "https://ntfy.sh/my-topic"
+```
+
+Discord and Slack webhook URLs are detected and sent JSON; everything else
+gets a plain-text body ([ntfy](https://ntfy.sh) style).
+
+## Persistence
+
+By default history lives in memory and a restart starts clean. To keep it:
+
+```toml
+history_file = "okboard-history.jsonl"
+```
+
+Samples append to that file and reload on startup. It grows forever; rotate
+or delete it whenever you like.
 
 ## Run it as a service
 
@@ -76,7 +98,7 @@ python test_okboard.py
 
 ## Non-goals
 
-Alerts, auth, persistence, multi-user, plugins. If you need those,
+Auth, multi-user, per-check pages, plugins. If you need those,
 [Uptime Kuma](https://github.com/louislam/uptime-kuma) is excellent.
 okboard stays one file you can read in five minutes.
 
